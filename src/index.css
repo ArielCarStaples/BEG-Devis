@@ -1,0 +1,51 @@
+@import "tailwindcss";
+
+@layer base {
+  /* Print specific styles for letter layout */
+  @media print {
+    body {
+      background-color: white !important;
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
+    }
+    @page {
+      size: letter portrait;
+      margin: 0;
+    }
+    #sidebar {
+      display: none !important;
+    }
+    #preview-wrapper {
+      width: 100% !important;
+      height: 100% !important;
+      overflow: hidden !important;
+      padding: 0 !important;
+      margin: 0 !important;
+      background-color: white !important;
+      display: block !important;
+    }
+    #preview-container {
+      box-shadow: none !important;
+      max-width: none !important;
+      width: 100% !important;
+      min-height: 100vh !important;
+      margin: 0 !important;
+      padding: 12mm !important; /* Proper print margins */
+    }
+  }
+
+  /* Custom scrollbar for sidebar */
+  ::-webkit-scrollbar {
+    width: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: #f1f1f1;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #cbd5e1;
+    border-radius: 4px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #94a3b8;
+  }
+}
