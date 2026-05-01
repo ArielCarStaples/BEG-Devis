@@ -1,7 +1,5 @@
 import { useState, useEffect } from 'react';
 import { Plus, Printer, Trash2, Loader2, Download, Upload, X } from 'lucide-react';
-import * as htmlToImage from 'html-to-image';
-import { jsPDF } from 'jspdf';
 
 interface Item {
   id: number;
@@ -77,6 +75,15 @@ export default function App() {
           if (json.instructions !== undefined) setInstructions(json.instructions);
           if (json.transport !== undefined) setTransport(json.transport);
           if (json.taxes !== undefined) setTaxes(json.taxes);
+
+          // Force resize textareas after import
+          setTimeout(() => {
+            document.querySelectorAll('textarea').forEach((el) => {
+              const target = el as HTMLTextAreaElement;
+              target.style.height = 'auto';
+              target.style.height = `${target.scrollHeight}px`;
+            });
+          }, 0);
         }
       } catch (err) {
         alert("Erreur lors de l'importation du fichier JSON.");
@@ -121,43 +128,34 @@ export default function App() {
       handleExportJSON();
     }
 
-    const element = document.getElementById('preview-container');
-    if (!element) return;
-    
-    try {
-      setIsExporting(true);
-      const imgData = await htmlToImage.toPng(element, {
-        pixelRatio: 2,
-        backgroundColor: '#ffffff',
-        style: {
-          margin: '0',
-          boxShadow: 'none',
-        }
-      });
-      
-      const pdf = new jsPDF({
-        orientation: 'portrait',
-        unit: 'mm',
-        format: 'letter',
-      });
-      
-      const pdfWidth = pdf.internal.pageSize.getWidth();
-      const pdfHeight = (element.offsetHeight * pdfWidth) / element.offsetWidth;
-      
-      const xOffset = (pdfWidth - pdfWidth) / 2;
-      
-      pdf.addImage(imgData, 'PNG', xOffset, 0, pdfWidth, pdfHeight);
-      pdf.save(`Devis_${devis || 'Nouveau'}.pdf`);
-    } catch (error) {
-      console.error('Erreur lors de la génération du PDF', error);
-      alert('Erreur lors de la génération du PDF: ' + (error instanceof Error ? error.message : String(error)));
-    } finally {
+    // Set exporting state to show loading briefly if needed, but primarily delay the print prompt
+    setIsExporting(true);
+    setTimeout(() => {
+      window.print();
       setIsExporting(false);
-    }
+    }, 500);
+  };
+
+  const handleDescChange = (id: number, e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    updateItem(id, 'desc', e.target.value);
+    e.target.style.height = 'auto'; // Reset to auto to get the actual scroll height
+    e.target.style.height = `${e.target.scrollHeight}px`; // Set to scroll height
   };
 
   return (
-    <div className="flex flex-col h-screen bg-gray-100 font-sans text-gray-900 overflow-hidden">
+    <div className="flex flex-col h-screen bg-gray-100 font-sans text-gray-900 overflow-hidden print:h-auto print:overflow-visible print:bg-white">
+      <style>{`
+        @media print {
+          @page {
+            size: letter portrait;
+            margin: 10mm;
+          }
+          body {
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+          }
+        }
+      `}</style>
       {showExportModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-white p-6 rounded shadow-xl flex flex-col gap-4 w-[400px] relative">
@@ -389,10 +387,10 @@ export default function App() {
                     />
                     <textarea
                       value={item.desc}
-                      onChange={(e) => updateItem(item.id, 'desc', e.target.value)}
-                      className="w-full text-xs border border-gray-300 p-1.5 rounded bg-gray-50 focus:ring-2 focus:ring-red-500 focus:outline-none resize-y min-h-[50px]"
+                      onChange={(e) => handleDescChange(item.id, e)}
+                      className="w-full text-xs border border-gray-300 p-1.5 rounded bg-gray-50 focus:ring-2 focus:ring-red-500 focus:outline-none resize-none overflow-hidden min-h-[40px]"
                       placeholder="Description"
-                      rows={2}
+                      rows={1}
                     ></textarea>
                     <input
                       type="number"
@@ -451,8 +449,8 @@ export default function App() {
         </aside>
 
         {/* RIGHT SIDE: REAL-TIME PREVIEW */}
-        <main id="preview-wrapper" className="flex-1 bg-gray-500 p-8 flex justify-center items-start overflow-y-auto print:bg-white print:p-0">
-          <div id="preview-container" className="bg-white shadow-2xl w-[215.9mm] min-h-[279.4mm] p-10 relative flex flex-col mx-auto shrink-0 print:shadow-none print:w-full print:p-12">
+        <main id="preview-wrapper" className="flex-1 bg-gray-500 p-8 flex justify-center items-start overflow-y-auto print:bg-white print:p-0 print:block print:overflow-visible print:h-auto">
+          <div id="preview-container" className="bg-white shadow-2xl w-[215.9mm] min-h-[279.4mm] p-10 relative flex flex-col mx-auto shrink-0 print:shadow-none print:w-full print:min-h-0 print:p-2 print:m-0">
             {/* HEADER */}
             <div className="flex justify-between mb-8 items-start">
               {/* Brand / Logo Layout */}
@@ -515,40 +513,21 @@ export default function App() {
               
               {/* Table Body */}
               <div className="flex-1 flex flex-col">
-                {validItems.length > 0 ? (
-                  validItems.map((item) => {
-                    const qty = parseFloat(item.qty) || 0;
-                    const price = parseFloat(item.price) || 0;
-                    const itemTotal = qty * price;
-                    return (
-                      <div key={item.id} className="grid grid-cols-[80px_1fr_100px_100px] text-sm border-b border-gray-100 min-h-[40px]">
-                        <div className="p-3 border-r border-black flex flex-row items-center justify-center text-center">{item.qty}</div>
-                        <div className="p-3 border-r border-black whitespace-pre-wrap break-words flex flex-row items-center justify-center text-center">{item.desc}</div>
-                        <div className="p-3 border-r border-black flex flex-row items-center justify-end text-right">{item.price ? `${price.toFixed(2)} $` : ''}</div>
-                        <div className="p-3 flex flex-row items-center justify-end text-right">
-                          {item.qty && item.price ? `${itemTotal.toFixed(2)} $` : ''}
-                        </div>
+                {validItems.map((item) => {
+                  const qty = parseFloat(item.qty) || 0;
+                  const price = parseFloat(item.price) || 0;
+                  const itemTotal = qty * price;
+                  return (
+                    <div key={item.id} className="grid grid-cols-[80px_1fr_100px_100px] text-sm border-b border-gray-100 min-h-[40px] break-inside-avoid">
+                      <div className="p-3 border-r border-black flex flex-col justify-center text-center">{item.qty}</div>
+                      <div className="p-3 border-r border-black whitespace-pre-wrap break-words flex flex-col justify-center text-center">{item.desc}</div>
+                      <div className="p-3 border-r border-black flex flex-col justify-center text-right">{item.price ? `${price.toFixed(2)} $` : ''}</div>
+                      <div className="p-3 flex flex-col justify-center text-right">
+                        {item.qty && item.price ? `${itemTotal.toFixed(2)} $` : ''}
                       </div>
-                    );
-                  })
-                ) : (
-                   <div className="flex-1 grid grid-cols-[80px_1fr_100px_100px] text-sm border-b border-gray-100 min-h-[160px]">
-                      <div className="border-r border-black"></div>
-                      <div className="border-r border-black"></div>
-                      <div className="border-r border-black"></div>
-                      <div></div>
-                   </div>
-                )}
-                
-                {/* Empty Fillers to make the table look structurally sound when there are few items */}
-                {validItems.length < 5 && Array.from({length: 5 - validItems.length}).map((_, i) => (
-                  <div key={`filler-${i}`} className="grid grid-cols-[80px_1fr_100px_100px] text-sm border-b border-gray-100">
-                    <div className="p-4 border-r border-black text-center"></div>
-                    <div className="p-4 border-r border-black"></div>
-                    <div className="p-4 border-r border-black text-right"></div>
-                    <div className="p-4 text-right"></div>
-                  </div>
-                ))}
+                    </div>
+                  );
+                })}
               </div>
             </div>
 
