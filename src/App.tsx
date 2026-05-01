@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Plus, Printer, Trash2, Loader2, Download, Upload, X } from 'lucide-react';
+import * as htmlToImage from 'html-to-image';
+import { jsPDF } from 'jspdf';
 
 interface Item {
   id: number;
@@ -121,6 +123,52 @@ export default function App() {
 
   const validItems = items.filter((item) => item.qty || item.desc || item.price);
 
+  const chunkItems = () => {
+    const pages: Item[][] = [];
+    let currentPage: Item[] = [];
+    let currentHeight = 0;
+    
+    // Total usable height ~ 1000px
+    const PAGE_HEIGHT = 1000; 
+    const HEADER_HEIGHT = 300; // Header + Info Blocks
+    const TABLE_HEADER_HEIGHT = 40;
+    const FOOTER_HEIGHT = 200 + (instructions ? 80 : 0);
+    
+    validItems.forEach((item) => {
+      // Very rough estimation of pixel height based on text lines
+      const newlines = (item.desc.match(/\n/g) || []).length;
+      const lengthLines = Math.ceil(item.desc.length / 45);
+      const lines = Math.max(1, newlines + lengthLines);
+      
+      const itemHeight = Math.max(40, 20 + (lines * 16));
+      
+      const isFirstPage = pages.length === 0;
+      let availableSpace = PAGE_HEIGHT - (isFirstPage ? HEADER_HEIGHT : 0) - TABLE_HEADER_HEIGHT;
+      
+      // Always reserve space for footer to avoid last page having just footer
+      availableSpace -= FOOTER_HEIGHT; 
+      
+      // If adding this item overflows the available space, push current page and start a new one
+      if (currentHeight + itemHeight > availableSpace && currentPage.length > 0) {
+        pages.push(currentPage);
+        currentPage = [];
+        currentHeight = 0;
+      }
+      
+      currentPage.push(item);
+      currentHeight += itemHeight;
+    });
+    
+    if (currentPage.length > 0) {
+      pages.push(currentPage);
+    }
+    
+    // Always return at least one page even if empty
+    return pages.length > 0 ? pages : [[]];
+  };
+
+  const chunkedPages = chunkItems();
+
   const executeExport = async (withJson: boolean) => {
     setShowExportModal(false);
     
@@ -128,12 +176,42 @@ export default function App() {
       handleExportJSON();
     }
 
-    // Set exporting state to show loading briefly if needed, but primarily delay the print prompt
-    setIsExporting(true);
-    setTimeout(() => {
-      window.print();
+    try {
+      setIsExporting(true);
+      
+      const pdf = new jsPDF({
+        orientation: 'portrait',
+        unit: 'mm',
+        format: 'letter',
+      });
+      
+      const pdfWidth = pdf.internal.pageSize.getWidth();
+      const pdfHeight = pdf.internal.pageSize.getHeight();
+      
+      for (let i = 0; i < chunkedPages.length; i++) {
+        const element = document.getElementById(`preview-page-${i}`);
+        if (!element) continue;
+        
+        const imgData = await htmlToImage.toPng(element, {
+          pixelRatio: 2,
+          backgroundColor: '#ffffff',
+          style: { margin: '0', boxShadow: 'none' }
+        });
+        
+        if (i > 0) {
+          pdf.addPage();
+        }
+        
+        pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
+      }
+      
+      pdf.save(`Devis_${devis || 'Nouveau'}.pdf`);
+    } catch (error) {
+      console.error('Erreur lors de la génération du PDF', error);
+      alert('Erreur lors de la génération du PDF: ' + (error instanceof Error ? error.message : String(error)));
+    } finally {
       setIsExporting(false);
-    }, 500);
+    }
   };
 
   const handleDescChange = (id: number, e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -214,7 +292,7 @@ export default function App() {
         </div>
       </header>
 
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex flex-1 overflow-hidden print:block print:overflow-visible print:h-auto">
         {/* LEFT SIDEBAR: INPUT FORM */}
         <aside id="sidebar" className="w-[320px] bg-white border-r border-gray-300 p-5 overflow-y-auto flex flex-col gap-6 shrink-0 print:hidden z-10 shadow-[2px_0_10px_rgba(0,0,0,0.03)]">
           <div className="space-y-6" id="input-form">
@@ -449,127 +527,151 @@ export default function App() {
         </aside>
 
         {/* RIGHT SIDE: REAL-TIME PREVIEW */}
-        <main id="preview-wrapper" className="flex-1 bg-gray-500 p-8 flex justify-center items-start overflow-y-auto print:bg-white print:p-0 print:block print:overflow-visible print:h-auto">
-          <div id="preview-container" className="bg-white shadow-2xl w-[215.9mm] min-h-[279.4mm] p-10 relative flex flex-col mx-auto shrink-0 print:shadow-none print:w-full print:min-h-0 print:p-2 print:m-0">
-            {/* HEADER */}
-            <div className="flex justify-between mb-8 items-start">
-              {/* Brand / Logo Layout */}
-              <div className="flex flex-col">
-                <img
-                  src="https://upload.wikimedia.org/wikipedia/commons/5/50/Logo_Bureau_en_gros_2018.svg"
-                  alt="Bureau en Gros"
-                  className="h-9 w-auto object-contain object-left"
-                  referrerPolicy="no-referrer"
-                />
-                <div className="text-sm text-gray-400 font-bold uppercase mt-2 tracking-widest ml-1">
-                  Centre de Solutions
-                </div>
-              </div>
-
-              {/* Right Meta Data */}
-              <div className="text-right">
-                <div className="text-[#e21836] font-bold text-4xl tracking-widest">DEVIS</div>
-                <div className="text-sm font-bold mt-1 uppercase">
-                  {devis ? `#${devis}` : ''}
-                </div>
-                <div className="text-sm mt-1 text-gray-600 font-medium">
-                   {date}
-                </div>
-              </div>
-            </div>
-
-            {/* INFO BLOCKS */}
-            <div className="grid grid-cols-2 gap-8 text-sm mb-8">
-              {/* Succursale Info */}
-              <div>
-                <div className="font-bold text-gray-400 uppercase mb-1">De :</div>
-                <div className="font-bold">Bureau en Gros {succursale ? `- Succursale #${succursale}` : ''}</div>
-                <div>{sContact}</div>
-                <div className="whitespace-pre-wrap">{sAdresse}</div>
-                <div className="mt-1">{sTel && `T. ${sTel}`}{sFax && sTel && ' | '}{sFax && `F. ${sFax}`}</div>
-                <div>{sEmail}</div>
-              </div>
-
-              {/* Client Info */}
-              <div className="border-l-2 border-red-600 pl-4">
-                <div className="font-bold text-gray-400 uppercase mb-1">Pour :</div>
-                <div className="font-bold">{cEntreprise}</div>
-                <div>{cContact}</div>
-                <div className="whitespace-pre-wrap">{cAdresse}</div>
-                <div className="mt-1">{cTel && `T. ${cTel}`}{cFax && cTel && ' | '}{cFax && `F. ${cFax}`}</div>
-                <div>{cEmail}</div>
-              </div>
-            </div>
-
-            {/* DATA TABLE */}
-            <div className="border border-black flex-none flex flex-col mb-6">
-              {/* Table Header */}
-              <div className="grid grid-cols-[80px_1fr_100px_100px] text-xs font-bold bg-gray-50 border-b border-black uppercase">
-                <div className="p-2 border-r border-black text-center">QTÉ</div>
-                <div className="p-2 border-r border-black text-center">DESCRIPTION</div>
-                <div className="p-2 border-r border-black text-right">UNITÉ</div>
-                <div className="p-2 text-right">TOTAL</div>
-              </div>
-              
-              {/* Table Body */}
-              <div className="flex-1 flex flex-col">
-                {validItems.map((item) => {
-                  const qty = parseFloat(item.qty) || 0;
-                  const price = parseFloat(item.price) || 0;
-                  const itemTotal = qty * price;
-                  return (
-                    <div key={item.id} className="grid grid-cols-[80px_1fr_100px_100px] text-sm border-b border-gray-100 min-h-[40px] break-inside-avoid">
-                      <div className="p-3 border-r border-black flex flex-col justify-center text-center">{item.qty}</div>
-                      <div className="p-3 border-r border-black whitespace-pre-wrap break-words flex flex-col justify-center text-center">{item.desc}</div>
-                      <div className="p-3 border-r border-black flex flex-col justify-center text-right">{item.price ? `${price.toFixed(2)} $` : ''}</div>
-                      <div className="p-3 flex flex-col justify-center text-right">
-                        {item.qty && item.price ? `${itemTotal.toFixed(2)} $` : ''}
+        <main id="preview-wrapper" className="flex-1 bg-gray-500 p-8 flex flex-col gap-8 items-center overflow-y-auto print:bg-white print:p-0 print:block print:overflow-visible print:h-auto">
+          {chunkedPages.map((pageItems, pageIndex) => (
+            <div 
+              key={`page-${pageIndex}`} 
+              id={`preview-page-${pageIndex}`} 
+              className="bg-white shadow-2xl w-[215.9mm] h-[279.4mm] overflow-hidden p-10 relative flex flex-col shrink-0 print:shadow-none print:w-full print:min-h-0 print:h-auto print:p-2 print:m-0"
+            >
+              {/* HEADER - Only on first page */}
+              {pageIndex === 0 && (
+                <>
+                  <div className="flex justify-between mb-8 items-start">
+                    {/* Brand / Logo Layout */}
+                    <div className="flex flex-col">
+                      <img
+                        src="https://upload.wikimedia.org/wikipedia/commons/5/50/Logo_Bureau_en_gros_2018.svg"
+                        alt="Bureau en Gros"
+                        className="h-9 w-auto object-contain object-left"
+                        referrerPolicy="no-referrer"
+                      />
+                      <div className="text-sm text-gray-400 font-bold uppercase mt-2 tracking-widest ml-1">
+                        Centre de Solutions
                       </div>
                     </div>
-                  );
-                })}
-              </div>
-            </div>
 
-            {/* INSTRUCTIONS SPÉCIALES */}
-            {instructions && (
-              <div className="mb-6 flex flex-col">
-                <div className="font-bold text-gray-400 text-xs uppercase mb-1">INSTRUCTIONS SPÉCIALES</div>
-                <div className="text-sm whitespace-pre-wrap text-gray-800 p-4 bg-gray-50 border border-gray-200 rounded">{instructions}</div>
-              </div>
-            )}
-            
-            <div className="flex-1"></div>
+                    {/* Right Meta Data */}
+                    <div className="text-right">
+                      <div className="text-[#e21836] font-bold text-4xl tracking-widest">DEVIS</div>
+                      <div className="text-sm font-bold mt-1 uppercase">
+                        {devis ? `#${devis}` : ''}
+                      </div>
+                      <div className="text-sm mt-1 text-gray-600 font-medium">
+                         {date}
+                      </div>
+                    </div>
+                  </div>
 
-            {/* FOOTER & TOTALS */}
-            <div className="mt-auto pt-6 flex justify-between border-t border-black">
-              <div className="text-[11px] text-gray-500 w-1/2 flex flex-col gap-2 leading-relaxed">
-                <p>Ceci est une demande de devis, non une commande finale.</p>
-                <p>Valide durant 14 jours, à partir de la date originale mentionnée ci-haut.</p>
-                <p>Les prix sont sujets à changement sans préavis.</p>
-                <p className="font-bold text-gray-800 mt-2 text-xs">MERCI DE VOTRE CONFIANCE !</p>
+                  {/* INFO BLOCKS */}
+                  <div className="grid grid-cols-2 gap-8 text-sm mb-8">
+                    {/* Succursale Info */}
+                    <div>
+                      <div className="font-bold text-gray-400 uppercase mb-1">De :</div>
+                      <div className="font-bold">Bureau en Gros {succursale ? `- Succursale #${succursale}` : ''}</div>
+                      <div>{sContact}</div>
+                      <div className="whitespace-pre-wrap">{sAdresse}</div>
+                      <div className="mt-1">{sTel && `T. ${sTel}`}{sFax && sTel && ' | '}{sFax && `F. ${sFax}`}</div>
+                      <div>{sEmail}</div>
+                    </div>
+
+                    {/* Client Info */}
+                    <div className="border-l-2 border-red-600 pl-4">
+                      <div className="font-bold text-gray-400 uppercase mb-1">Pour :</div>
+                      <div className="font-bold">{cEntreprise}</div>
+                      <div>{cContact}</div>
+                      <div className="whitespace-pre-wrap">{cAdresse}</div>
+                      <div className="mt-1">{cTel && `T. ${cTel}`}{cFax && cTel && ' | '}{cFax && `F. ${cFax}`}</div>
+                      <div>{cEmail}</div>
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {/* Page Number (if multi-page) */}
+              {chunkedPages.length > 1 && (
+                <div className="absolute top-4 right-10 text-xs font-bold text-gray-400">
+                  Page {pageIndex + 1} / {chunkedPages.length}
+                </div>
+              )}
+
+              {/* DATA TABLE */}
+              <div className="border border-black flex-none flex flex-col mb-6">
+                {/* Table Header */}
+                <div className="grid grid-cols-[80px_1fr_100px_100px] text-xs font-bold bg-gray-50 border-b border-black uppercase">
+                  <div className="p-2 border-r border-black text-center">QTÉ</div>
+                  <div className="p-2 border-r border-black text-center">DESCRIPTION</div>
+                  <div className="p-2 border-r border-black text-right">UNITÉ</div>
+                  <div className="p-2 text-right">TOTAL</div>
+                </div>
+                
+                {/* Table Body */}
+                <div className="flex-1 flex flex-col">
+                  {pageItems.map((item) => {
+                    const qty = parseFloat(item.qty) || 0;
+                    const price = parseFloat(item.price) || 0;
+                    const itemTotal = qty * price;
+                    return (
+                      <div key={item.id} className="grid grid-cols-[80px_1fr_100px_100px] text-sm border-b border-gray-100 min-h-[40px] break-inside-avoid">
+                        <div className="p-3 border-r border-black flex flex-col justify-center text-center">{item.qty}</div>
+                        <div className="p-3 border-r border-black whitespace-pre-wrap break-words flex flex-col justify-center text-center">{item.desc}</div>
+                        <div className="p-3 border-r border-black flex flex-col justify-center text-right">{item.price ? `${price.toFixed(2)} $` : ''}</div>
+                        <div className="p-3 flex flex-col justify-center text-right">
+                          {item.qty && item.price ? `${itemTotal.toFixed(2)} $` : ''}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
-              
-              <div className="w-[220px] flex flex-col gap-2 text-sm">
-                <div className="flex justify-between">
-                  <span className="text-gray-500">SOUS-TOTAL</span>
-                  <span>{totalPartiel > 0 ? `${totalPartiel.toFixed(2)} $` : '-'}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-500">TRANSPORT</span>
-                  <span>{tTransport > 0 ? `${tTransport.toFixed(2)} $` : '-'}</span>
-                </div>
-                <div className="flex justify-between text-gray-500 mb-1">
-                  <span>TAXES</span>
-                  <span className="text-gray-900">{tTaxes > 0 ? `${tTaxes.toFixed(2)} $` : '-'}</span>
-                </div>
-                <div className="flex justify-between font-bold text-lg pt-2 border-t border-black">
-                  <span>TOTAL</span>
-                  <span>{total > 0 ? `${total.toFixed(2)} $` : '-'}</span>
-                </div>
-              </div>
+
+              {/* FOOTER - Only on last page */}
+              {pageIndex === chunkedPages.length - 1 ? (
+                <>
+                  {/* INSTRUCTIONS SPÉCIALES */}
+                  {instructions && (
+                    <div className="mb-6 flex flex-col">
+                      <div className="font-bold text-gray-400 text-xs uppercase mb-1">INSTRUCTIONS SPÉCIALES</div>
+                      <div className="text-sm whitespace-pre-wrap text-gray-800 p-4 bg-gray-50 border border-gray-200 rounded">{instructions}</div>
+                    </div>
+                  )}
+                  
+                  <div className="flex-1"></div>
+
+                  {/* FOOTER & TOTALS */}
+                  <div className="mt-auto pt-6 flex justify-between border-t border-black break-inside-avoid">
+                    <div className="text-[11px] text-gray-500 w-1/2 flex flex-col gap-2 leading-relaxed">
+                      <p>Ceci est une demande de devis, non une commande finale.</p>
+                      <p>Valide durant 14 jours, à partir de la date originale mentionnée ci-haut.</p>
+                      <p>Les prix sont sujets à changement sans préavis.</p>
+                      <p className="font-bold text-gray-800 mt-2 text-xs">MERCI DE VOTRE CONFIANCE !</p>
+                    </div>
+                    
+                    <div className="w-[220px] flex flex-col gap-2 text-sm">
+                      <div className="flex justify-between">
+                        <span className="text-gray-500">SOUS-TOTAL</span>
+                        <span>{totalPartiel > 0 ? `${totalPartiel.toFixed(2)} $` : '-'}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-500">TRANSPORT</span>
+                        <span>{tTransport > 0 ? `${tTransport.toFixed(2)} $` : '-'}</span>
+                      </div>
+                      <div className="flex justify-between text-gray-500 mb-1">
+                        <span>TAXES</span>
+                        <span className="text-gray-900">{tTaxes > 0 ? `${tTaxes.toFixed(2)} $` : '-'}</span>
+                      </div>
+                      <div className="flex justify-between font-bold text-lg pt-2 border-t border-black">
+                        <span>TOTAL</span>
+                        <span>{total > 0 ? `${total.toFixed(2)} $` : '-'}</span>
+                      </div>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div className="flex-1"></div>
+              )}
             </div>
-          </div>
+          ))}
         </main>
       </div>
     </div>
