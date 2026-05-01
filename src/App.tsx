@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Plus, Printer, Trash2, Loader2, Download, Upload, X } from 'lucide-react';
 import * as htmlToImage from 'html-to-image';
 import { jsPDF } from 'jspdf';
@@ -128,28 +128,36 @@ export default function App() {
     let currentPage: Item[] = [];
     let currentHeight = 0;
     
-    // Total usable height ~ 1000px
-    const PAGE_HEIGHT = 1000; 
-    const HEADER_HEIGHT = 300; // Header + Info Blocks
-    const TABLE_HEADER_HEIGHT = 40;
-    const FOOTER_HEIGHT = 200 + (instructions ? 80 : 0);
+    // Total usable height is around 1000px but we play it very safe by keeping it smaller
+    const PAGE_HEIGHT = 800; // Increased safety margin
+    const HEADER_HEIGHT = 320; 
+    const TABLE_HEADER_HEIGHT = 50;
+    const FOOTER_HEIGHT = 300; // Large estimate for footer
     
-    validItems.forEach((item) => {
-      // Very rough estimation of pixel height based on text lines
-      const newlines = (item.desc.match(/\n/g) || []).length;
-      const lengthLines = Math.ceil(item.desc.length / 45);
-      const lines = Math.max(1, newlines + lengthLines);
-      
-      const itemHeight = Math.max(40, 20 + (lines * 16));
+    validItems.forEach((item, index) => {
+      // Estimate height of item
+      const charsPerLine = 35;
+      const explicitNewlines = (item.desc.match(/\n/g) || []).length;
+      const wrappedLines = Math.ceil(item.desc.length / charsPerLine);
+      const estimatedLines = explicitNewlines + wrappedLines;
+      const itemHeight = Math.max(50, 20 + (estimatedLines * 20)); 
       
       const isFirstPage = pages.length === 0;
-      let availableSpace = PAGE_HEIGHT - (isFirstPage ? HEADER_HEIGHT : 0) - TABLE_HEADER_HEIGHT;
+      let availableSpace = PAGE_HEIGHT;
       
-      // Always reserve space for footer to avoid last page having just footer
-      availableSpace -= FOOTER_HEIGHT; 
+      if (isFirstPage) {
+        availableSpace -= HEADER_HEIGHT;
+      }
+      availableSpace -= TABLE_HEADER_HEIGHT;
       
-      // If adding this item overflows the available space, push current page and start a new one
-      if (currentHeight + itemHeight > availableSpace && currentPage.length > 0) {
+      const isLastItem = index === validItems.length - 1;
+      let spaceNeeded = itemHeight;
+      
+      if (isLastItem) {
+        spaceNeeded += FOOTER_HEIGHT; // Footer must fit on the last page with the last item
+      }
+      
+      if (currentHeight + spaceNeeded > availableSpace && currentPage.length > 0) {
         pages.push(currentPage);
         currentPage = [];
         currentHeight = 0;
@@ -163,7 +171,6 @@ export default function App() {
       pages.push(currentPage);
     }
     
-    // Always return at least one page even if empty
     return pages.length > 0 ? pages : [[]];
   };
 
@@ -202,7 +209,18 @@ export default function App() {
           pdf.addPage();
         }
         
-        pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
+          const imgProps = pdf.getImageProperties(imgData);
+          const pdfPageHeight = pdf.internal.pageSize.getHeight();
+          let finalImageHeight = (imgProps.height * pdfWidth) / imgProps.width;
+          let finalImageWidth = pdfWidth;
+
+          if (finalImageHeight > pdfPageHeight) {
+             const scaleRatio = pdfPageHeight / finalImageHeight;
+             finalImageWidth = pdfWidth * scaleRatio;
+             finalImageHeight = pdfPageHeight;
+          }
+
+          pdf.addImage(imgData, 'PNG', (pdfWidth - finalImageWidth) / 2, 0, finalImageWidth, finalImageHeight);
       }
       
       pdf.save(`Devis_${devis || 'Nouveau'}.pdf`);
@@ -532,7 +550,7 @@ export default function App() {
             <div 
               key={`page-${pageIndex}`} 
               id={`preview-page-${pageIndex}`} 
-              className="bg-white shadow-2xl w-[215.9mm] h-[279.4mm] overflow-hidden p-10 relative flex flex-col shrink-0 print:shadow-none print:w-full print:min-h-0 print:h-auto print:p-2 print:m-0"
+              className="bg-white shadow-2xl w-[215.9mm] min-h-[279.4mm] h-auto p-10 relative flex flex-col shrink-0 print:shadow-none print:w-full print:min-h-0 print:h-auto print:p-2 print:m-0"
             >
               {/* HEADER - Only on first page */}
               {pageIndex === 0 && (
