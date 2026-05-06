@@ -125,53 +125,17 @@ export default function App() {
 
   const chunkItems = () => {
     const pages: Item[][] = [];
-    let currentPage: Item[] = [];
-    let currentHeight = 0;
+    const MAX_ITEMS_PER_PAGE = 7;
     
-    // Total usable height is around 1000px but we play it very safe by keeping it smaller
-    const PAGE_HEIGHT = 800; // Increased safety margin
-    const HEADER_HEIGHT = 320; 
-    const TABLE_HEADER_HEIGHT = 50;
-    const FOOTER_HEIGHT = 300; // Large estimate for footer
-    
-    validItems.forEach((item, index) => {
-      // Estimate height of item
-      const charsPerLine = 35;
-      const explicitNewlines = (item.desc.match(/\n/g) || []).length;
-      const wrappedLines = Math.ceil(item.desc.length / charsPerLine);
-      const estimatedLines = explicitNewlines + wrappedLines;
-      const itemHeight = Math.max(50, 20 + (estimatedLines * 20)); 
-      
-      const isFirstPage = pages.length === 0;
-      let availableSpace = PAGE_HEIGHT;
-      
-      if (isFirstPage) {
-        availableSpace -= HEADER_HEIGHT;
-      }
-      availableSpace -= TABLE_HEADER_HEIGHT;
-      
-      const isLastItem = index === validItems.length - 1;
-      let spaceNeeded = itemHeight;
-      
-      if (isLastItem) {
-        spaceNeeded += FOOTER_HEIGHT; // Footer must fit on the last page with the last item
-      }
-      
-      if (currentHeight + spaceNeeded > availableSpace && currentPage.length > 0) {
-        pages.push(currentPage);
-        currentPage = [];
-        currentHeight = 0;
-      }
-      
-      currentPage.push(item);
-      currentHeight += itemHeight;
-    });
-    
-    if (currentPage.length > 0) {
-      pages.push(currentPage);
+    for (let i = 0; i < validItems.length; i += MAX_ITEMS_PER_PAGE) {
+      pages.push(validItems.slice(i, i + MAX_ITEMS_PER_PAGE));
     }
     
-    return pages.length > 0 ? pages : [[]];
+    if (pages.length === 0) {
+      pages.push([]);
+    }
+    
+    return pages;
   };
 
   const chunkedPages = chunkItems();
